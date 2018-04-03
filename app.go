@@ -94,9 +94,15 @@ func dbInitialize() {
 		"UPDATE users SET del_flg = 1 WHERE id % 50 = 0",
 	}
 
+	wg := &sync.WaitGroup{}
 	for _, sql := range sqls {
-		db.Exec(sql)
+		wg.Add(1)
+		go func() {
+			db.Exec(sql)
+			wg.Done()
+		}()
 	}
+	wg.Wait()
 }
 
 func tryLogin(accountName, password string) *User {
@@ -325,6 +331,9 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 
 	u := tryLogin(r.FormValue("account_name"), r.FormValue("password"))
 
+	fmt.Println("hoge")
+	fmt.Println(r.FormValue("account_name"))
+	fmt.Println(r.FormValue("password"))
 	if u != nil {
 		session := getSession(r)
 		session.Values["user_id"] = u.ID
@@ -336,7 +345,7 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 		session := getSession(r)
 		session.Values["notice"] = "アカウント名かパスワードが間違っています"
 		session.Save(r, w)
-
+		r.Method = "GET"
 		http.Redirect(w, r, "/login", http.StatusFound)
 	}
 }
@@ -724,23 +733,25 @@ func getImage(c web.C, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	} else {
-		post := Post{}
-		derr := db.Get(&post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
-		if derr != nil {
-			fmt.Println(derr.Error())
-			return
-		}
-		if ext == "jpg" && post.Mime == "image/jpeg" ||
-			ext == "png" && post.Mime == "image/png" ||
-			ext == "gif" && post.Mime == "image/gif" {
-			w.Header().Set("Content-Type", post.Mime)
-			_, err := w.Write(post.Imgdata)
-			if err != nil {
-				fmt.Println(err.Error())
+		go func() {
+			post := Post{}
+			derr := db.Get(&post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+			if derr != nil {
+				fmt.Println(derr.Error())
+				return
 			}
-			chache[m2] = Chache{Data: post.Imgdata, Mime: post.Mime}
-			return
-		}
+			if ext == "jpg" && post.Mime == "image/jpeg" ||
+				ext == "png" && post.Mime == "image/png" ||
+				ext == "gif" && post.Mime == "image/gif" {
+				w.Header().Set("Content-Type", post.Mime)
+				_, err := w.Write(post.Imgdata)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+				chache[m2] = Chache{Data: post.Imgdata, Mime: post.Mime}
+				return
+			}
+		}()
 	}
 
 	w.WriteHeader(http.StatusNotFound)
